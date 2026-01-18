@@ -29,9 +29,15 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install (safe even without deps)
-        run: npm ci || npm install
-
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            echo "No lock file found, running npm install to generate package-lock.json"
+          npm install
+          fi
+          
       - name: Run tests
         run: npm test
 
