@@ -7,6 +7,11 @@ on:
     branches: [ "main" ]
   workflow_dispatch: {}
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+
 jobs:
   build_test:
     name: Build and Test
@@ -16,11 +21,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Print branch
+        run: echo "Branch is $GITHUB_REF"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
 
       - name: Install (safe even without deps)
         run: npm ci || npm install
