@@ -1,119 +1,78 @@
-name: Release (Dev -> QA -> Prod)
+name: CI
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Release version (example: 1.0.0)"
-        required: true
-        type: string
-      deploy_to:
-        description: "Highest environment to deploy"
-        required: true
-        type: choice
-        options:
-          - dev
-          - qa
-          - prod
+  pull_request:
+    branches: [ "main" ]
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: {}
 
 concurrency:
-  group: release
-  cancel-in-progress: false
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build once
+  test:
+    name: Test (PR + Push)
     runs-on: ubuntu-latest
-
-    outputs:
-      artifact_name: ${{ steps.meta.outputs.artifact_name }}
+    if: github.event_name != 'workflow_dispatch'
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node (with cache)
+      - name: Setup Node (cache)
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: |
+            **/package-lock.json
 
-      - name: Install
-        run: npm ci
+      - name: Install dependencies (CI-safe)
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --package-lock-only
+            npm ci
+          fi
 
-      - name: Test
+      - name: Run tests
         run: npm test
+
+  build:
+    name: Build (Main + Manual)
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name != 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node (cache)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            **/package-lock.json
+
+      - name: Install dependencies (CI-safe)
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --package-lock-only
+            npm ci
+          fi
 
       - name: Build
         run: npm run build
 
-      - name: Set artifact metadata
-        id: meta
-        run: echo "artifact_name=dist-${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
-
-      - name: Upload artifact
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ github.event.inputs.version }}
+          name: dist
           path: dist/
-
-  deploy_dev:
-    name: Deploy to Dev
-    runs-on: ubuntu-latest
-    needs: build
-    environment: dev
-    if: contains(fromJson('["dev","qa","prod"]'), github.event.inputs.deploy_to)
-
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.build.outputs.artifact_name }}
-          path: dist
-
-      - name: Deploy (simulate)
-        run: |
-          echo "Deploying version=${{ github.event.inputs.version }} to DEV"
-          echo "Target: ${{ secrets.DEPLOY_URL }}"
-          ls -la dist
-
-  deploy_qa:
-    name: Deploy to QA
-    runs-on: ubuntu-latest
-    needs: deploy_dev
-    environment: qa
-    if: contains(fromJson('["qa","prod"]'), github.event.inputs.deploy_to)
-
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-${{ github.event.inputs.version }}
-          path: dist
-
-      - name: Deploy (simulate)
-        run: |
-          echo "Deploying version=${{ github.event.inputs.version }} to QA"
-          echo "Target: ${{ secrets.DEPLOY_URL }}"
-          ls -la dist
-
-  deploy_prod:
-    name: Deploy to Prod
-    runs-on: ubuntu-latest
-    needs: deploy_qa
-    environment: prod
-    if: github.event.inputs.deploy_to == 'prod'
-
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-${{ github.event.inputs.version }}
-          path: dist
-
-      - name: Deploy (simulate)
-        run: |
-          echo "Deploying version=${{ github.event.inputs.version }} to PROD"
-          echo "Target: ${{ secrets.DEPLOY_URL }}"
-          ls -la dist
